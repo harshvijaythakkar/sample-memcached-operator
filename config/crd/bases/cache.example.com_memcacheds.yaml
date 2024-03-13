@@ -34,6 +34,9 @@ spec:
           spec:
             description: MemcachedSpec defines the desired state of Memcached
             properties:
+              containerImage:
+                description: ContainerImage defines the memcached image to be used
+                type: string
               containerPort:
                 description: ContainerPort defines the port that will be used to init
                   the container with the image

@@ -39,6 +39,9 @@ type MemcachedSpec struct {
 
 	// ContainerPort defines the port that will be used to init the container with the image
 	ContainerPort int32 `json:"containerPort,omitempty"`
+
+	// ContainerImage defines the memcached image to be used
+	ContainerImage string `json:"containerImage,omitempty"`
 }
 
 // MemcachedStatus defines the observed state of Memcached
