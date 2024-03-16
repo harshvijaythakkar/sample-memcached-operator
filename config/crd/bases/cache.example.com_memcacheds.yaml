@@ -35,7 +35,8 @@ spec:
             description: MemcachedSpec defines the desired state of Memcached
             properties:
               containerImage:
-                description: ContainerImage defines the memcached image to be used
+                description: 'ContainerImage defines the memcached image to be used
+                  eg: containerImage: "memcached:1.4.36-alpine"'
                 type: string
               containerPort:
                 description: ContainerPort defines the port that will be used to init
