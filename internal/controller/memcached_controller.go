@@ -258,14 +258,57 @@ func (r *MemcachedReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{Requeue: true}, nil
 	}
 
+	// The CRD API is defining that the Memcached type, have a MemcachedSpec.ContainerImage field
+	// to set the image in Deployment instances is the desired state on the cluster.
+	// Therefore, the following code will ensure the Deployment image is the same as defined
+	// via the ContainerImage spec of the Custom Resource which we are reconciling.
+
+	// Get the deployment object again
+	// found = &appsv1.Deployment{}
+	// err = r.Get(ctx, types.NamespacedName{Name: memcached.Name, Namespace: memcached.Namespace}, found)
+	// if err != nil {
+	// 	logger.Error(err, "Failed to get Deployment")
+	// 	return ctrl.Result{}, err
+	// }
+	
+	// container can have multiple pod but in our case we will have only 1 pod
+	image := memcached.Spec.ContainerImage
+	if found.Spec.Template.Spec.Containers[0].Image != image {
+		logger.Info("Updating Image")
+		found.Spec.Template.Spec.Containers[0].Image = image
+		if err := r.Update(ctx, found); err != nil {
+			logger.Error(err, "Failed to update Deployment", "Deployment.Namespace", found.Namespace, "Deployment.Name", found.Name)
+
+			// Re-fetch the memcached Custom Resource before update the status
+			// so that we have the latest state of the resource on the cluster and we will avoid
+			// raise the issue "the object has been modified, please apply
+			// your changes to the latest version and try again" which would re-trigger the reconciliation
+			if err := r.Get(ctx, req.NamespacedName, memcached); err != nil {
+				logger.Error(err, "Failed to re-fetch memcached")
+				return ctrl.Result{}, err
+			}
+
+			// The following implementation will update the status
+			meta.SetStatusCondition(&memcached.Status.Conditions, metav1.Condition{Type: typeAvailableMemcached, Status: metav1.ConditionFalse, Reason: "Resizing", Message: fmt.Sprintf("Failed to update the containerImage for the custom resource (%s): (%s)", memcached.Name, err)})
+			if err := r.Status().Update(ctx, memcached); err != nil {
+				logger.Error(err, "Failed to update Memcached status")
+				return ctrl.Result{}, err
+			}
+			return ctrl.Result{}, err
+		}
+
+		// Now, that we update the size we want to requeue the reconciliation
+		// so that we can ensure that we have the latest state of the resource before
+		// update. Also, it will help ensure the desired state on the cluster
+		return ctrl.Result{Requeue: true}, nil
+	}
+
 	// The following implementation will update the status
-	meta.SetStatusCondition(&memcached.Status.Conditions, metav1.Condition{Type: typeAvailableMemcached, Status: metav1.ConditionTrue, Reason: "Reconciling", Message: fmt.Sprintf("Deployment for custom resource (%s) with %d replicas created successfully", memcached.Name, size)})
+	meta.SetStatusCondition(&memcached.Status.Conditions, metav1.Condition{Type: typeAvailableMemcached, Status: metav1.ConditionTrue, Reason: "Reconciling", Message: fmt.Sprintf("Deployment for custom resource (%s) with %d replicas and \"%s\" image created successfully", memcached.Name, size, image)})
 	if err := r.Status().Update(ctx, memcached); err != nil {
 		logger.Error(err, "Failed to update Memcached status")
 		return ctrl.Result{}, err
 	}
-
-	// Add code for image update and container port update
 
 	return ctrl.Result{}, nil
 }
