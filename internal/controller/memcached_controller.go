@@ -37,6 +37,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	cachev1alpha1 "github.com/harshvijaythakkar/sample-memcached-operator/api/v1alpha1"
 )
@@ -135,6 +136,16 @@ func (r *MemcachedReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			logger.Error(err, "Failed to update custom resource to add finalizer")
 			return ctrl.Result{}, err
 		}
+
+		// Let's re-fetch the memcached Custom Resource after adding finalizer
+		// so that we have the latest state of the resource on the cluster and we will avoid
+		// raise the issue "the object has been modified, please apply
+		// your changes to the latest version and try again" which would re-trigger the reconciliation
+		// if we try to update it again in the following operations
+		if err := r.Get(ctx, req.NamespacedName, memcached); err != nil {
+			logger.Error(err, "Failed to re-fetch memcached")
+			return ctrl.Result{}, err
+		}
 	}
 
 	// Check if the Memcached instance is marked to be deleted, which is
@@ -143,6 +154,16 @@ func (r *MemcachedReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	if isMemcachedMarkedToBeDeleted {
 		if controllerutil.ContainsFinalizer(memcached, memcachedFinalizer) {
 			logger.Info("Performing Finalizer Operations for Memcached before delete CR")
+
+			// Let's re-fetch the memcached Custom Resource brefore updating degraded status
+			// so that we have the latest state of the resource on the cluster and we will avoid
+			// raise the issue "the object has been modified, please apply
+			// your changes to the latest version and try again" which would re-trigger the reconciliation
+			// if we try to update it again in the following operations
+			if err := r.Get(ctx, req.NamespacedName, memcached); err != nil {
+				logger.Error(err, "Failed to re-fetch memcached")
+				return ctrl.Result{}, err
+			}
 
 			// Let's add here an status "Downgrade" to define that this resource begin its process to be terminated.
 			meta.SetStatusCondition(&memcached.Status.Conditions, metav1.Condition{Type: typeDegradedMemcached, Status: metav1.ConditionUnknown, Reason: "Finalizing", Message: fmt.Sprintf("Performing finalizer operations for the custom resource: %s ", memcached.Name)})
@@ -270,7 +291,7 @@ func (r *MemcachedReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	// 	logger.Error(err, "Failed to get Deployment")
 	// 	return ctrl.Result{}, err
 	// }
-	
+
 	// container can have multiple pod but in our case we will have only 1 pod
 	image := memcached.Spec.ContainerImage
 	if found.Spec.Template.Spec.Containers[0].Image != image {
@@ -418,7 +439,7 @@ func (r *MemcachedReconciler) deploymentForMemcached(memcached *cachev1alpha1.Me
 							ContainerPort: memcached.Spec.ContainerPort,
 							Name:          "memcached",
 						}},
-						Command: []string{"memcached", "-o", "modern", "-v"},
+						Command: []string{"memcached", "-p", fmt.Sprint(memcached.Spec.ContainerPort) , "-o", "modern", "-v"},
 					}},
 				},
 			},
@@ -453,5 +474,6 @@ func (r *MemcachedReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&cachev1alpha1.Memcached{}).
 		Owns(&appsv1.Deployment{}).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 2}).
+		WithEventFilter(predicate.Or(predicate.GenerationChangedPredicate{}, predicate.ResourceVersionChangedPredicate{})).
 		Complete(r)
 }
